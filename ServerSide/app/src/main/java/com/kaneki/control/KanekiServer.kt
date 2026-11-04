@@ -32,6 +32,8 @@ class PcConn(private val sock: Socket) {
 object KanekiServer {
     const val PORT = 6000
     const val BEACON_PORT = 6001
+    const val VERSION = "1.0.0"
+    private const val GITHUB_REPO = "kaneki654/kanekiControllV2"
     interface Listener { fun onDevices(); fun onLog() }
     @volatile var token = "kaneki"
     @volatile var listener: Listener? = null
@@ -176,4 +178,48 @@ object KanekiServer {
     }
     private fun randHex() = ByteArray(16).also { rng.nextBytes(it) }.joinToString("") { "%02x".format(it) }
     private fun safeEq(a: String, b: String) = MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
+
+    fun checkUpdate(onResult: (latestTag: String?, downloadUrl: String?) -> Unit) {
+        thread(isDaemon = true, name = "kc-update") {
+            try {
+                val url = java.net.URL("https://api.github.com/repos/$GITHUB_REPO/releases/latest")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.setRequestProperty("User-Agent", "KanekiControl")
+                conn.connectTimeout = 10_000
+                conn.readTimeout = 10_000
+                val body = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                val json = JSONObject(body)
+                val tag = json.optString("tag_name").trimStart('v')
+                if (tag.isEmpty() || !isNewer(tag, VERSION)) {
+                    onResult(null, null); return@thread
+                }
+                val assets = json.optJSONArray("assets")
+                var apkUrl: String? = null
+                if (assets != null) {
+                    for (i in 0 until assets.length()) {
+                        val a = assets.getJSONObject(i)
+                        if (a.optString("name").endsWith(".apk")) {
+                            apkUrl = a.optString("browser_download_url")
+                            break
+                        }
+                    }
+                }
+                if (apkUrl.isNullOrEmpty()) apkUrl = json.optString("html_url")
+                onResult(tag, apkUrl)
+            } catch (e: Exception) {
+                onResult(null, null)
+            }
+        }
+    }
+
+    private fun isNewer(remote: String, local: String): Boolean {
+        fun parts(v: String) = v.split(".").map { it.toIntOrNull() ?: 0 }
+        val r = parts(remote); val l = parts(local)
+        for (i in 0 until maxOf(r.size, l.size)) {
+            val rv = r.getOrElse(i) { 0 }; val lv = l.getOrElse(i) { 0 }
+            if (rv != lv) return rv > lv
+        }
+        return false
+    }
 }

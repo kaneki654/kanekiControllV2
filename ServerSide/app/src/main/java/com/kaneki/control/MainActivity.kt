@@ -1,7 +1,9 @@
 package com.kaneki.control
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
@@ -79,9 +81,13 @@ class MainActivity : Activity(), KanekiServer.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
-        root.addView(TextView(this).apply {
+        val titleRow = LinearLayout(this)
+        titleRow.addView(TextView(this).apply {
             text = "KanekiControlv2"; textSize = 22f; setTypeface(typeface, Typeface.BOLD)
-        })
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        titleRow.addView(btn("Check Update") { checkForUpdate() })
+        root.addView(titleRow)
+        root.addView(TextView(this).apply { text = "v${KanekiServer.VERSION}"; textSize = 10f })
         status = TextView(this).apply { textSize = 12f }
         root.addView(status)
         val tokenBox = EditText(this).apply {
@@ -199,6 +205,26 @@ class MainActivity : Activity(), KanekiServer.Listener {
             .setPositiveButton("Run") { _, _ -> go() }
             .setNegativeButton("Cancel", null).show()
     }
+    private fun checkForUpdate() {
+        toast("Checking for updates…")
+        KanekiServer.checkUpdate { tag, url ->
+            runOnUiThread {
+                if (tag == null) {
+                    toast("Already up to date (v${KanekiServer.VERSION})")
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Update Available: v$tag")
+                        .setMessage("A new version is available.\n\nOpen the download page?")
+                        .setPositiveButton("Open") { _, _ ->
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                        .setNegativeButton("Later", null)
+                        .show()
+                }
+            }
+        }
+    }
+
     private fun localIps(): String = try {
         NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback }

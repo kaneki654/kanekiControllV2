@@ -24,6 +24,9 @@ OUT = os.path.join(os.path.expanduser("~"), "KanekiControl")
 LOG_PATH = os.path.join(OUT, "client.log")
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".kaneki_client.json")
 HOTSPOT_DEFAULT = "192.168.42.1"
+VERSION = "1.0.0"
+GITHUB_REPO = "kaneki654/kanekiControllV2"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 def _find_adb():
     found = shutil.which("adb")
     if found:
@@ -523,6 +526,58 @@ def uninstall_autostart():
     if os.path.exists(vbs):
         os.remove(vbs)
         print(f"[OK] Removed {vbs}")
+def _version_tuple(v):
+    try:
+        return tuple(int(x) for x in v.lstrip("v").split("."))
+    except Exception:
+        return (0,)
+
+def check_update():
+    """Returns (tag, url) if a newer release exists, else (None, None)."""
+    try:
+        req = urllib.request.Request(GITHUB_API, headers={"User-Agent": "KanekiControl"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        tag = data.get("tag_name", "")
+        if not tag or _version_tuple(tag) <= _version_tuple(VERSION):
+            return None, None
+        for asset in data.get("assets", []):
+            if asset.get("name") == "kaneki_client.py":
+                return tag, asset["browser_download_url"]
+        return tag, data.get("html_url")
+    except Exception:
+        return None, None
+
+def self_update():
+    tag, url = check_update()
+    if not tag:
+        log(f"Already up to date (v{VERSION}).")
+        return
+    if not url or not url.endswith(".py"):
+        log(f"Update {tag} available. Download from: {url}")
+        return
+    log(f"Downloading update {tag}...")
+    tmp = SCRIPT_PATH + ".tmp"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "KanekiControl"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+        with open(tmp, encoding="utf-8") as f:
+            f.read(64)
+        os.replace(tmp, SCRIPT_PATH)
+        log(f"Updated to {tag}. Please restart the client to apply.")
+    except Exception as e:
+        log(f"Update failed: {e}")
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+
+def _startup_update_check():
+    tag, url = check_update()
+    if tag:
+        log(f"[update] v{tag} available — run with --update to apply ({url})")
+
 def _ensure_autostart():
     check = subprocess.run(["schtasks", "/Query", "/TN", SERVICE_NAME], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     task_missing = check.returncode != 0
@@ -591,6 +646,7 @@ def main():
     ap.add_argument("--install",   action="store_true",
                     help="install hidden autostart task (run as Administrator)")
     ap.add_argument("--uninstall", action="store_true", help="remove autostart task")
+    ap.add_argument("--update",    action="store_true", help="check for updates and apply if available")
     args = ap.parse_args()
     if args.install:
         install_autostart(args)
@@ -598,15 +654,20 @@ def main():
     if args.uninstall:
         uninstall_autostart()
         return
+    if args.update:
+        self_update()
+        return
     _ensure_autostart()
     exclude = {args.usb} if args.usb else set()
     ok, out = adb(None, "start-server", timeout=30)
     if not ok and "not found" in out:
         log(out)
         return
+    log(f"KanekiControl v{VERSION} (client)")
     log(f"adb: {ADB}")
     log(f"scrcpy: {SCRCPY or 'not found — Mirror button will not work'}")
     log(f"output folder: {OUT}")
+    jobs.submit(_startup_update_check)
     while True:
         try:
             if args.usb:

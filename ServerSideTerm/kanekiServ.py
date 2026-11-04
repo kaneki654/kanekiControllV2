@@ -4,13 +4,20 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 import socket
+import sys
 import threading
 import time
+import urllib.request
 from datetime import datetime
 PORT = 6000
 BEACON_PORT = 6001
 CONFIG_PATH = os.path.expanduser("~/kaneki_config.json")
+VERSION = "1.0.0"
+GITHUB_REPO = "kaneki654/kanekiControllV2"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+SCRIPT_PATH = os.path.abspath(__file__)
 TOKEN = None
 TOKEN_LOCK = threading.Lock()
 class SafeEncoder(json.JSONEncoder):
@@ -263,6 +270,8 @@ Commands:
   pcs                         list connected PCs
   token                       show current token
   reset-token                 clear saved token (next PC sets a new one)
+  version                     show server version
+  update                      check for updates and apply if available
   <cmd> [arg]                 send to ALL devices
   <cmd> [arg] -s SERIAL       send to specific device
 
@@ -282,6 +291,60 @@ Available commands:
 
 Type 'help' to show this again, 'quit' to exit.
 """
+def _version_tuple(v):
+    try:
+        return tuple(int(x) for x in v.lstrip("v").split("."))
+    except Exception:
+        return (0,)
+
+def check_update():
+    """Returns (tag, url) if a newer release exists, else (None, None)."""
+    try:
+        req = urllib.request.Request(GITHUB_API, headers={"User-Agent": "KanekiControl"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        tag = data.get("tag_name", "")
+        if not tag or _version_tuple(tag) <= _version_tuple(VERSION):
+            return None, None
+        for asset in data.get("assets", []):
+            if asset.get("name") == "kanekiServ.py":
+                return tag, asset["browser_download_url"]
+        return tag, data.get("html_url")
+    except Exception:
+        return None, None
+
+def self_update():
+    tag, url = check_update()
+    if not tag:
+        log(f"Already up to date (v{VERSION}).")
+        return False
+    if not url or not url.endswith(".py"):
+        log(f"Update {tag} available. Download from: {url}")
+        return False
+    log(f"Downloading update {tag}...")
+    tmp = SCRIPT_PATH + ".tmp"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "KanekiControl"})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+        with open(tmp, encoding="utf-8") as f:
+            f.read(64)
+        os.replace(tmp, SCRIPT_PATH)
+        log(f"Updated to {tag}. Run 'python {SCRIPT_PATH}' to restart.")
+        return True
+    except Exception as e:
+        log(f"Update failed: {e}")
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+def _startup_update_check():
+    tag, url = check_update()
+    if tag:
+        log(f"[update] v{tag} available — type 'update' or run with --update ({url})")
+
 def shell_loop():
     print(HELP)
     while True:
@@ -296,6 +359,13 @@ def shell_loop():
             os._exit(0)
         if line in ("help", "h", "?"):
             print(HELP)
+            continue
+        if line == "version":
+            print(f"KanekiControl v{VERSION} (server)")
+            continue
+        if line == "update":
+            if self_update():
+                print("Restart to apply the update.")
             continue
         if line == "devices":
             devs = all_devices()
@@ -338,10 +408,16 @@ def main():
     ap = argparse.ArgumentParser(description="KanekiControl v2 Server (Termux) — token auto-captured")
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--no-shell", action="store_true", help="headless mode, no interactive prompt")
+    ap.add_argument("--update", action="store_true", help="check for updates and apply if available")
     args = ap.parse_args()
+    if args.update:
+        self_update()
+        return
     threading.Thread(target=beacon_loop, daemon=True).start()
     threading.Thread(target=accept_loop, args=(args.port,), daemon=True).start()
     time.sleep(0.5)
+    log(f"KanekiControl v{VERSION} (server)")
+    threading.Thread(target=_startup_update_check, daemon=True).start()
     if args.no_shell:
         log("running headless — Ctrl+C to stop")
         try:
