@@ -303,16 +303,16 @@ CMDS = {
     "info":             c_info,
     "shell":            lambda s, a: adb(s, "shell", a, timeout=60),
     "adb":              lambda s, a: adb(s, *shlex.split(a, posix=False), timeout=300),
-    "list_dir":         c_list_dir,
-    "download":         c_download,
-    "delete":           c_delete,
-    "compress":         c_compress,
+    "list_dir":         lambda s, a: c_list_dir(s, a),
+    "download":         lambda s, a: c_download(s, a),
+    "delete":           lambda s, a: c_delete(s, a),
+    "compress":         lambda s, a: c_compress(s, a),
 }
 PC_CMDS = {
     "connect":     c_connect,
-    "shutdown_pc": c_shutdown_pc,
-    "restart_pc":  c_restart_pc,
-    "list_pc":     c_list_pc,
+    "shutdown_pc": lambda _, a: c_shutdown_pc(_, a),
+    "restart_pc":  lambda _, a: c_restart_pc(_, a),
+    "list_pc":     lambda _, a: c_list_pc(_, a),
 }
 def run_safe(fn, serial, arg):
     try:
