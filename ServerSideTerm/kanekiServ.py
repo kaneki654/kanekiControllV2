@@ -67,6 +67,15 @@ def log(msg):
             f.write(line + "\n")
     except Exception:
         pass
+def notify(msg):
+    """Print key events to terminal AND write to log file."""
+    line = f"[{datetime.now():%H:%M:%S}] {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 def mac(token, nonce):
     return hmac.new(token.encode(), nonce.encode(), hashlib.sha256).hexdigest()
 def safe_eq(a, b):
@@ -161,7 +170,7 @@ def handle_pc(sock, addr):
             for k in stale:
                 clients.pop(k)
             clients[addr_str] = client
-        log(f"PC connected: {pc_name} ({addr_str})")
+        notify(f"PC connected: {pc_name} ({addr_str})")
         print_devices()
         for line in rf:
             line = line.strip()
@@ -200,7 +209,7 @@ def handle_pc(sock, addr):
         sock.close()
         with clients_lock:
             client.pop(addr_str, None)
-        log(f"PC disconnected: {client['name']}")
+        notify(f"PC disconnected: {client['name']}")
         print_devices()
 def print_devices():
     devs = all_devices()
