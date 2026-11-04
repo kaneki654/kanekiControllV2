@@ -18,6 +18,7 @@ VERSION = "1.0.0"
 GITHUB_REPO = "kaneki654/kanekiControllV2"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 SCRIPT_PATH = os.path.abspath(__file__)
+LOG_PATH = os.path.expanduser("~/kaneki_server.log")
 TOKEN = None
 TOKEN_LOCK = threading.Lock()
 class SafeEncoder(json.JSONEncoder):
@@ -60,7 +61,13 @@ def set_token(tok):
     save_config("token", tok)
     log(f"token captured and saved automatically")
 def log(msg):
-    print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
+    line = f"[{datetime.now():%H:%M:%S}] {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 def mac(token, nonce):
     return hmac.new(token.encode(), nonce.encode(), hashlib.sha256).hexdigest()
 def safe_eq(a, b):
@@ -239,7 +246,7 @@ def beacon_loop():
             with clients_lock:
                 pcs = list(clients.values())
             for pc in pcs:
-                send_to(pc, {"t", "ping"})
+                send_to(pc, {"t": "ping"})
             time.sleep(2)
     except Exception as e:
         log(f"beacon error: {e}")
@@ -288,7 +295,16 @@ Available commands:
              open_url list_apps foreground
   Tools    : screenshot record notify vibrate push mirror info
              shell adb
+  Files    : list_dir [path]            list device directory (default /sdcard)
+             download <path[,path2]>    pull file(s) from device to PC
+             delete <path[,path2]>      delete file(s) on device  (multi ok)
+             compress <path[,path2]>    zip file(s) on device     (multi ok)
+  PC       : shutdown_pc [delay_secs]   shutdown the PC
+             restart_pc  [delay_secs]   restart the PC
+             list_pc [path]             list PC directory
 
+  log                         show log file path
+  log clear                   clear the log file
 Type 'help' to show this again, 'quit' to exit.
 """
 def _version_tuple(v):
@@ -367,6 +383,16 @@ def shell_loop():
             if self_update():
                 print("Restart to apply the update.")
             continue
+        if line == "log":
+            print(f"Log file: {LOG_PATH}")
+            continue
+        if line == "log clear":
+            try:
+                open(LOG_PATH, "w").close()
+                print("Log cleared.")
+            except Exception as e:
+                print(f"Error: {e}")
+            continue
         if line == "devices":
             devs = all_devices()
             if not devs:
@@ -417,6 +443,7 @@ def main():
     threading.Thread(target=accept_loop, args=(args.port,), daemon=True).start()
     time.sleep(0.5)
     log(f"KanekiControl v{VERSION} (server)")
+    log(f"Log file: {LOG_PATH}")
     threading.Thread(target=_startup_update_check, daemon=True).start()
     if args.no_shell:
         log("running headless — Ctrl+C to stop")
