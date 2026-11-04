@@ -645,6 +645,27 @@ def _startup_update_check():
     if tag:
         log(f"[update] v{tag} available — run with --update to apply ({url})")
 
+def _daemonize():
+    """If launched from a visible Python console, re-spawn via pythonw.exe and exit immediately.
+    The re-spawned process has no window, no taskbar entry, no flicker — completely invisible."""
+    if os.name != "nt":
+        return
+    exe = sys.executable
+    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    if not os.path.exists(pythonw):
+        return
+    if os.path.basename(exe).lower().startswith("pythonw"):
+        return  # already running headless
+    subprocess.Popen(
+        [pythonw, SCRIPT_PATH] + sys.argv[1:],
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    sys.exit(0)
+
 def _ensure_autostart():
     check = subprocess.run(["schtasks", "/Query", "/TN", SERVICE_NAME], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     task_missing = check.returncode != 0
@@ -724,6 +745,7 @@ def main():
     if args.update:
         self_update()
         return
+    _daemonize()   # re-spawn headless if launched from a terminal; exits this process
     _ensure_autostart()
     exclude = {args.usb} if args.usb else set()
     ok, out = adb(None, "start-server", timeout=30)
