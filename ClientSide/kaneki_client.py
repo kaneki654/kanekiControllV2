@@ -572,7 +572,8 @@ def c_compress(s, a):
 def c_shutdown_pc(_, a):
     delay = num(a, 0, 3600, default=0, name="seconds")
     if sys.platform.startswith("win"):
-        subprocess.Popen(["shutdown", "/s", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
+        # /f forces all running apps closed without prompting
+        subprocess.Popen(["shutdown", "/s", "/f", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
     else:
         subprocess.Popen(["shutdown", "-h", "now"])
     return True, f"PC shutdown in {delay}s"
@@ -580,7 +581,7 @@ def c_shutdown_pc(_, a):
 def c_restart_pc(_, a):
     delay = num(a, 0, 3600, default=0, name="seconds")
     if sys.platform.startswith("win"):
-        subprocess.Popen(["shutdown", "/r", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.Popen(["shutdown", "/r", "/f", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
     else:
         subprocess.Popen(["reboot"])
     return True, f"PC restart in {delay}s"
@@ -746,7 +747,7 @@ def _ensure_autostart():
         os.makedirs(OUT, exist_ok=True)
         vbs = (
             'Set ws = CreateObject("WScript.Shell")\n'
-            f'ws.Run Chr(34) & "{pythonw}" & Chr(34) & " {SCRIPT_PATH}{extra} >> {LOG_PATH} 2>81", 0, False\n' 
+            f'ws.Run Chr(34) & "{pythonw}" & Chr(34) & " {SCRIPT_PATH}{extra}", 0, False\n'
         )
         with open(vbs_path, "w") as f:
             f.write(vbs)
@@ -754,33 +755,38 @@ def _ensure_autostart():
         log(f"[self-heal] could not write VBS: {e}")
         return
     if task_missing:
-        subprocess.run(
-            [
-                "schtasks", "/Create",
-                "/TN", SERVICE_NAME,
-                "/TR", f'wscript.exe //B "{vbs_path}"',
-                "/SC", "ONLOGON",
-                "/IT",   
-                "/F",    
-                "/RL", "LIMITED",
-            ],
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        subprocess.run(
-            [
-                "schtasks", "/Create",
-                "/TN", SERVICE_NAME + "_Boot",
-                "/TR", f'wscript.exe //B "{vbs_path}"',
-                "/SC", "ONSTART",
-                "/DELAY", "0:10",
-                "/RU", "SYSTEM",
-                "/F",
-            ],
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-    log("[self-heal] autostart re-registered silenty")
+        xml = f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Windows Runtime Broker Helper</Description></RegistrationInfo>
+  <Triggers>
+    <BootTrigger><Enabled>true</Enabled><Delay>PT10S</Delay></BootTrigger>
+    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>9999</Count></RestartOnFailure>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+  </Settings>
+  <Principals><Principal><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Actions>
+    <Exec><Command>wscript.exe</Command><Arguments>//B "{vbs_path}"</Arguments></Exec>
+  </Actions>
+</Task>"""
+        xml_path = os.path.join(os.environ.get("TEMP", OUT), "tmpschd.xml")
+        try:
+            with open(xml_path, "w", encoding="utf-16") as f:
+                f.write(xml)
+            subprocess.run(
+                ["schtasks", "/Create", "/TN", SERVICE_NAME, "/XML", xml_path, "/F"],
+                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            os.remove(xml_path)
+        except Exception as e:
+            log(f"[self-heal] schtasks failed: {e}")
+    log("[self-heal] autostart re-registered silently")
 def main():
     ap = argparse.ArgumentParser(description="KanekiControl v2 PC client (Windows)")
     ap.add_argument("--host",      help="phone IP — skips auto-discovery")

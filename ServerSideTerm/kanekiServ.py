@@ -62,7 +62,6 @@ def set_token(tok):
     log(f"token captured and saved automatically")
 def log(msg):
     line = f"[{datetime.now():%H:%M:%S}] {msg}"
-    print(line, flush=True)
     try:
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -449,6 +448,8 @@ def main():
     time.sleep(0.5)
     log(f"KanekiControl v{VERSION} (server)")
     log(f"Log file: {LOG_PATH}")
+    print(f"[*] KanekiControl v{VERSION} — logs → {LOG_PATH}", flush=True)
+    print(f"[*] Type 'help' for commands.", flush=True)
     threading.Thread(target=_startup_update_check, daemon=True).start()
     if args.no_shell:
         log("running headless — Ctrl+C to stop")
