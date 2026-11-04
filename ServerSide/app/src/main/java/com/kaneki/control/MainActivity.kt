@@ -62,6 +62,17 @@ class MainActivity : Activity(), KanekiServer.Listener {
             C("Notify", "notify", arg = true), C("Vibrate", "vibrate", arg = true, req = false),
             C("Push file", "push", arg = true), C("Mirror", "mirror"), C("Info", "info"),
             C("Shell", "shell", arg = true), C("ADB raw", "adb", arg = true)
+        ),
+        "Files" to listOf(
+            C("List dir", "list_dir", arg = true, req = false),
+            C("Download", "download", arg = true),
+            C("Delete", "delete", arg = true, danger = true),
+            C("Compress", "compress", arg = true)
+        ),
+        "PC Control" to listOf(
+            C("Shutdown PC", "shutdown_pc", arg = true, req = false, danger = true, pc = true),
+            C("Restart PC", "restart_pc", arg = true, req = false, danger = true, pc = true),
+            C("List PC dir", "list_pc", arg = true, req = false, pc = true)
         )
     )
     private lateinit var status: TextView
@@ -112,7 +123,7 @@ class MainActivity : Activity(), KanekiServer.Listener {
         devBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(devBox)
         argBox = EditText(this).apply {
-            hint = "arg: package . URL . text . x y . number . PC path . shell"
+            hint = "arg: package / URL / text / x y / number / path (comma-sep for multi)"
             isSingleLine = true
         }
         root.addView(argBox)

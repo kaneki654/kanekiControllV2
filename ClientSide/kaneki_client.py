@@ -303,8 +303,17 @@ CMDS = {
     "info":             c_info,
     "shell":            lambda s, a: adb(s, "shell", a, timeout=60),
     "adb":              lambda s, a: adb(s, *shlex.split(a, posix=False), timeout=300),
+    "list_dir":         c_list_dir,
+    "download":         c_download,
+    "delete":           c_delete,
+    "compress":         c_compress,
 }
-PC_CMDS = {"connect": c_connect}
+PC_CMDS = {
+    "connect":     c_connect,
+    "shutdown_pc": c_shutdown_pc,
+    "restart_pc":  c_restart_pc,
+    "list_pc":     c_list_pc,
+}
 def run_safe(fn, serial, arg):
     try:
         return fn(serial, arg)
@@ -528,6 +537,62 @@ def uninstall_autostart():
     if os.path.exists(vbs):
         os.remove(vbs)
         print(f"[OK] Removed {vbs}")
+def c_list_dir(s, a):
+    path = shlex.quote(a.strip() or "/sdcard")
+    return sh(s, f"ls -la {path}")
+
+def c_download(s, a):
+    paths = [p.strip() for p in a.replace(",", " ").split() if p.strip()]
+    if not paths:
+        return False, "usage: download <remote_path> [path2 ...]"
+    os.makedirs(os.path.join(OUT, "downloads"), exist_ok=True)
+    results = []
+    for remote in paths:
+        name = safe(os.path.basename(remote.rstrip("/")))
+        dest = os.path.join(OUT, "downloads", f"{safe(s)}_{stamp()}_{name}")
+        ok, out = adb(s, "pull", remote, dest, timeout=300)
+        results.append(f"{'OK' if ok else 'ERR'}: {remote} -> {dest if ok else out}")
+    return all(r.startswith("OK") for r in results), "\n".join(results)
+
+def c_delete(s, a):
+    paths = [p.strip() for p in a.replace(",", " ").split() if p.strip()]
+    if not paths:
+        return False, "usage: delete <path> [path2 ...]"
+    return sh(s, "rm -rf " + " ".join(shlex.quote(p) for p in paths))
+
+def c_compress(s, a):
+    parts = [p.strip() for p in a.replace(",", " ").split() if p.strip()]
+    if not parts:
+        return False, "usage: compress <path> [path2 ...]"
+    dst = f"/sdcard/Download/kaneki_{stamp()}.zip"
+    files = " ".join(shlex.quote(p) for p in parts)
+    return sh(s, f"zip -r {shlex.quote(dst)} {files}", timeout=120)
+
+def c_shutdown_pc(_, a):
+    delay = num(a, 0, 3600, default=0, name="seconds")
+    if sys.platform.startswith("win"):
+        subprocess.Popen(["shutdown", "/s", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        subprocess.Popen(["shutdown", "-h", "now"])
+    return True, f"PC shutdown in {delay}s"
+
+def c_restart_pc(_, a):
+    delay = num(a, 0, 3600, default=0, name="seconds")
+    if sys.platform.startswith("win"):
+        subprocess.Popen(["shutdown", "/r", "/t", str(delay)], creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        subprocess.Popen(["reboot"])
+    return True, f"PC restart in {delay}s"
+
+def c_list_pc(_, a):
+    path = os.path.expanduser(a.strip() or "~")
+    try:
+        entries = sorted(os.listdir(path))
+        lines = [("[D] " if os.path.isdir(os.path.join(path, e)) else "[F] ") + e for e in entries]
+        return True, "\n".join(lines) or "(empty)"
+    except Exception as ex:
+        return False, str(ex)
+
 def _version_tuple(v):
     try:
         return tuple(int(x) for x in v.lstrip("v").split("."))
