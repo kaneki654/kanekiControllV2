@@ -428,6 +428,8 @@ def session(host, port, args, exclude):
     try:
         for line in rf:
             msg = json.loads(line)
+            if not isinstance(msg, dict):
+                continue
             if msg.get("t") == "cmd":
                 log(f"cmd #{msg.get('id')} {msg.get('cmd')} {msg.get('arg') or ''}".rstrip())
                 threading.Thread(target=handle_cmd, args=(msg, send, exclude), daemon=True).start()
