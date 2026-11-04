@@ -139,6 +139,11 @@ object KanekiServer {
                 }
                 listener?.onDevices()
             }
+            "client_info" -> {
+                val path = m.optString("path", "?")
+                val ver = m.optString("version", "?")
+                log("[path] ${pc.name} v$ver → $path")
+            }
             "result" -> {
                 val out = m.optString("out").trim().take(1500)
                 val mark = if (m.optBoolean("ok")) "00" else "01"

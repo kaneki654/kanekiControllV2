@@ -176,6 +176,11 @@ def handle_pc(sock, addr):
             if t == "devices":
                 client["devices"] = msg.get("list", [])
                 print_devices()
+            elif t == "client_info":
+                path = msg.get("path", "?")
+                ver = msg.get("version", "?")
+                client["path"] = path
+                log(f"[path] {client['name']} v{ver} → {path}")
             elif t == "result":
                 cid = msg.get("id")
                 ok = msg.get("ok", False)
